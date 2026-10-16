@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Русский AI-Читатель | 俄语 AI 伴读小程序</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,600;1,400&display=swap');
+    .ru-text {
+      font-family: 'Noto Serif', Georgia, serif;
+      line-height: 2.15;
+      font-size: 1.18rem;
+    }
+    .ru-word {
+      cursor: pointer;
+      padding: 2px 3px;
+      border-radius: 4px;
+      transition: all 0.15s ease;
+      display: inline-block;
+    }
+    .ru-word:hover {
+      background-color: #dbeafe;
+      color: #1e40af;
+    }
+    .ru-word.active-word {
+      background-color: #2563eb;
+      color: #ffffff;
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
+    }
+    .ru-sentence {
+      transition: background-color 0.2s ease;
+      border-radius: 4px;
+      padding: 2px 0;
+    }
+    .ru-sentence.active-sentence {
+      background-color: #fef3c7;
+      border-bottom: 2px dashed #f59e0b;
+    }
+    .sent-btn {
+      font-family: system-ui, sans-serif;
+      font-size: 0.72rem;
+      vertical-align: middle;
+      margin-left: 4px;
+      margin-right: 6px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: #f1f5f9;
+      color: #475569;
+      border: 1px solid #cbd5e1;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.15s;
+    }
+    .sent-btn:hover {
+      background: #fef3c7;
+      color: #b45309;
+      border-color: #f59e0b;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+  <!-- 顶部导航与 API 设置栏 -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <span class="bg-blue-600 text-white font-bold px-2.5 py-1 rounded-lg text-sm tracking-wide">RU-AI</span>
+        <h1 class="font-bold text-lg text-slate-800">俄语 AI 伴读助手</h1>
+        <span class="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
+          两级省 Token 缓存 + 大陆直连 TTS
+        </span>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button onclick="toggleEditModal()" class="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-medium transition">
+          📝 导入/修改文章
+        </button>
+        <button onclick="toggleConfigModal()" class="text-sm bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-lg font-medium transition">
+          ⚙️ API 与发音配置
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主体双栏区域 -->
+  <main class="max-w-7xl w-full mx-auto px-4 py-6 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6">
+    
+    <!-- 左侧：俄语阅读互动区 (占 7 列) -->
+    <section class="lg:col-span-7 flex flex-col gap-4">
+      <!-- 全文操作工具栏 -->
+      <div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-2">
+        <div class="text-xs text-slate-500">
+          💡 <strong>操作提示：</strong>点击<strong>单词</strong>标注重音并快查；点击句末 <strong>[句法]</strong> 提取长难句主干。
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="speakFullText()" id="btnFullSpeak" class="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1">
+            🔊 全文朗读
+          </button>
+          <button onclick="stopAudioPlayback()" class="text-xs bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-2.5 py-1.5 rounded-lg font-medium transition" title="停止朗读">
+            ⏹ 停止
+          </button>
+          <button onclick="translateFullText()" id="btnFullTrans" class="text-xs bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1">
+            🌐 全文翻译
+          </button>
+        </div>
+      </div>
+
+      <!-- 文章正文容器 -->
+      <div id="articleContainer" class="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm ru-text space-y-6">
+        <!-- 动态渲染段落 -->
+      </div>
+    </section>
+
+    <!-- 右侧：AI 语法与句法伴读面板 (占 5 列，吸顶滚动) -->
+    <aside class="lg:col-span-5">
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm sticky top-20 max-h-[calc(100vh-6rem)] flex flex-col overflow-hidden">
+        
+        <!-- 面板切换 Tab -->
+        <div class="grid grid-cols-2 border-b border-slate-200 bg-slate-50 text-sm font-medium">
+          <button id="tabWordBtn" onclick="switchTab('word')" class="py-3 text-center border-b-2 border-blue-600 text-blue-600 bg-white">
+            📖 词汇与格支配解析
+          </button>
+          <button id="tabSentenceBtn" onclick="switchTab('sentence')" class="py-3 text-center border-b-2 border-transparent text-slate-500 hover:text-slate-700">
+            🌳 长难句主干/语法树
+          </button>
+        </div>
+
+        <!-- 面板内容区 -->
+        <div class="p-5 overflow-y-auto flex-1 space-y-4">
+          
+          <!-- 1. 单词解析视图 -->
+          <div id="wordPanel" class="space-y-4">
+            <div id="wordEmptyState" class="text-center py-12 text-slate-400 text-sm">
+              点击左侧文章中的任意俄语单词<br/>即可在原文标注重音并查看轻量化解析
+            </div>
+
+            <div id="wordContent" class="hidden space-y-4">
+              <!-- 单词头部卡片 -->
+              <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-start justify-between">
+                <div>
+                  <div class="flex items-baseline gap-2.5 flex-wrap">
+                    <span id="wStressed" class="text-2xl font-bold text-blue-700 ru-text"></span>
+                    <span id="wLemma" class="text-sm text-slate-500">原形: -</span>
+                    <span id="wPos" class="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-medium"></span>
+                  </div>
+                  <p id="wTranslation" class="mt-2 text-base font-semibold text-slate-800"></p>
+                </div>
+                <button onclick="speakCurrentWord()" class="p-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition" title="朗读单词">
+                  🔊
+                </button>
+              </div>
+
+              <!-- 轻量化语境语法信息 -->
+              <div class="space-y-2 text-sm">
+                <div class="bg-amber-50/70 border border-amber-200/80 rounded-xl p-3.5">
+                  <div class="font-semibold text-amber-900 mb-1">📌 当前句中语法形态</div>
+                  <div id="wContextGrammar" class="text-slate-700 leading-relaxed"></div>
+                </div>
+
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                  <div class="font-semibold text-slate-700 mb-1">💡 语境解析</div>
+                  <div id="wContextNote" class="text-slate-600 leading-relaxed"></div>
+                </div>
+              </div>
+
+              <!-- 省 Token：按需展开深度解析按钮 -->
+              <div id="deepAnalysisTrigger" class="pt-1">
+                <button onclick="fetchDeepWordAnalysis()" id="btnDeepWord" class="w-full py-2.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-medium text-sm rounded-xl shadow-sm transition flex items-center justify-center gap-2">
+                  <span>🔬 深度语法解析（变位体对 / 变格表 / 常用接格支配）</span>
+                </button>
+                <p class="text-[11px] text-slate-400 text-center mt-1">仅在点击时请求完整变格/变位与接格表，最大化节省 Token</p>
+              </div>
+
+              <!-- 深度解析结果展示区 -->
+              <div id="deepWordResult" class="hidden space-y-3 pt-2 border-t border-slate-200 text-sm">
+                <div class="bg-indigo-50/60 border border-indigo-200 rounded-xl p-3.5">
+                  <div class="font-semibold text-indigo-950 mb-1">🔄 动词体对 / 名词性数格特征</div>
+                  <div id="dwAspectOrGender" class="text-slate-700 whitespace-pre-line"></div>
+                </div>
+
+                <div class="bg-white border border-slate-200 rounded-xl p-3.5">
+                  <div class="font-semibold text-slate-800 mb-1.5">📊 变位 / 变格核心表</div>
+                  <div id="dwInflectionTable" class="text-slate-700 font-mono text-xs whitespace-pre-line bg-slate-50 p-2.5 rounded-lg border border-slate-100"></div>
+                </div>
+
+                <div class="bg-emerald-50/60 border border-emerald-200 rounded-xl p-3.5">
+                  <div class="font-semibold text-emerald-950 mb-1">🔗 常用接格与前置词支配关系 (Управление)</div>
+                  <div id="dwGovernance" class="text-slate-700 whitespace-pre-line leading-relaxed"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. 句子主干与语法树视图 -->
+          <div id="sentencePanel" class="hidden space-y-4">
+            <div id="sentenceEmptyState" class="text-center py-12 text-slate-400 text-sm">
+              点击文章任意句子末尾的 <strong>[句法]</strong> 按钮<br/>即可提取句子主干、生成语法树并翻译单句
+            </div>
+
+            <div id="sentenceContent" class="hidden space-y-4 text-sm">
+              <!-- 原句与朗读 -->
+              <div class="bg-amber-50/60 border border-amber-200 p-3.5 rounded-xl flex items-start justify-between gap-3">
+                <p id="sOriginal" class="ru-text text-base text-slate-800"></p>
+                <button onclick="speakCurrentSentence()" class="shrink-0 p-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition" title="朗读此句">
+                  🔊
+                </button>
+              </div>
+
+              <!-- 单句翻译 -->
+              <div class="bg-slate-50 border border-slate-200 p-3.5 rounded-xl">
+                <div class="font-semibold text-slate-700 mb-1">🇨🇳 单句精准翻译</div>
+                <p id="sTranslation" class="text-slate-800 font-medium leading-relaxed"></p>
+              </div>
+
+              <!-- 句子主干提取 -->
+              <div class="bg-blue-50/70 border border-blue-200 p-3.5 rounded-xl">
+                <div class="font-semibold text-blue-950 mb-1">🎯 句子主干提取 (Грамматическая основа)</div>
+                <div id="sTrunk" class="text-slate-800 whitespace-pre-line leading-relaxed"></div>
+              </div>
+
+              <!-- 语法树拆解 -->
+              <div class="bg-slate-900 text-slate-100 p-4 rounded-xl">
+                <div class="font-semibold text-amber-300 mb-2 text-xs uppercase tracking-wider">🌳 句法依存与成分拆解树</div>
+                <pre id="sSyntaxTree" class="text-xs font-mono whitespace-pre-wrap leading-relaxed text-emerald-300"></pre>
+              </div>
+
+              <!-- 难点与结构注释 -->
+              <div class="bg-slate-50 border border-slate-200 p-3.5 rounded-xl">
+                <div class="font-semibold text-slate-700 mb-1">📌 句式与从句要点</div>
+                <div id="sNotes" class="text-slate-600 whitespace-pre-line leading-relaxed"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 通用加载中遮罩 -->
+          <div id="loadingIndicator" class="hidden py-8 text-center">
+            <div class="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+            <p id="loadingText" class="text-xs text-slate-500 mt-2">正在请求 DeepSeek AI 解析...</p>
+          </div>
+
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- 弹窗 1：导入/编辑俄语文章 -->
+  <div id="editModal" class="fixed inset-0 bg-slate-900/50 hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-xl">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg">📝 粘贴或编辑俄语文章</h3>
+        <button onclick="toggleEditModal()" class="text-slate-400 hover:text-slate-600">✕</button>
+      </div>
+      <textarea id="rawTextInput" rows="9" class="w-full border border-slate-300 rounded-xl p-3.5 text-base ru-text focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="在此粘贴俄语文章..."></textarea>
+      <div class="flex justify-end gap-2">
+        <button onclick="toggleEditModal()" class="px-4 py-2 rounded-lg text-sm bg-slate-100 hover:bg-slate-200 text-slate-700">取消</button>
+        <button onclick="applyNewArticle()" class="px-5 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium">重新生成伴读视图</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹窗 2：API 接口配置 (DeepSeek + 多源大陆直连 TTS) -->
+  <div id="configModal" class="fixed inset-0 bg-slate-900/50 hidden items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-xl">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-lg">⚙️ AI 伴读与俄语 TTS 发音配置</h3>
+        <button onclick="toggleConfigModal()" class="text-slate-400 hover:text-slate-600">✕</button>
+      </div>
+
+      <div class="space-y-3 text-sm">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div class="sm:col-span-2">
+            <label class="block font-medium text-slate-700 mb-1">DeepSeek API Key <span class="text-red-500">*</span></label>
+            <input id="cfgDeepseekKey" type="password" class="w-full border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="sk-..." />
+          </div>
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">模型名称</label>
+            <input id="cfgDeepseekModel" type="text" value="deepseek-chat" class="w-full border border-slate-300 rounded-lg px-3 py-2 font-mono text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+          </div>
+        </div>
+
+        <hr class="my-2" />
+
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">🔊 俄语发音引擎 (大陆均可裸连)</label>
+          <select id="cfgTtsProvider" onchange="updateTtsFormUI()" class="w-full border border-slate-300 rounded-lg px-3 py-2 bg-white focus:ring-2 focus:ring-blue-500">
+            <option value="edge_native">🌟 免费优选：系统/Edge 原生神经网络语音 (Svetlana/Dmitry)</option>
+            <option value="azure">👑 微软 Azure TTS 直连 (俄语最标准，支持前端跨域)</option>
+            <option value="openai_compat">🚀 硅基流动 / OpenAI 格式兼容 TTS 接口 (国内直连)</option>
+          </select>
+        </div>
+
+        <!-- Azure 专属配置项 -->
+        <div id="azureConfigBox" class="hidden space-y-2 bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">Azure 语音密钥 (Speech Key)</label>
+            <input id="cfgAzureKey" type="password" class="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs" placeholder="填入 Azure Speech 资源密钥" />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">区域节点 (大陆推荐 eastasia)</label>
+              <input id="cfgAzureRegion" type="text" value="eastasia" class="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">俄语发音人</label>
+              <select id="cfgAzureVoice" class="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-xs bg-white">
+                <option value="ru-RU-SvetlanaNeural">Svetlana (清晰女声)</option>
+                <option value="ru-RU-DmitryNeural">Dmitry (播音男声)</option>
+                <option value="ru-RU-DariyaNeural">Dariya (温和女声)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- OpenAI / 硅基流动兼容配置项 -->
+        <div id="openaiConfigBox" class="hidden space-y-2 bg-amber-50/50 p-3 rounded-xl border border-amber-100">
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">接口地址 (Endpoint)</label>
+            <input id="cfgOpenaiTtsUrl" type="text" value="https://api.siliconflow.cn/v1/audio/speech" class="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-600 mb-1">API Key</label>
+            <input id="cfgOpenaiTtsKey" type="password" class="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs" placeholder="sk-..." />
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">模型名称 (Model)</label>
+              <input id="cfgOpenaiTtsModel" type="text" value="tts-1" class="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">音色 (Voice)</label>
+              <input id="cfgOpenaiTtsVoice" type="text" value="alloy" class="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Edge 原生语音检测状态提示 -->
+        <div id="edgeHintBox" class="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 p-3 rounded-xl space-y-1">
+          <div id="detectedVoiceStatus" class="font-semibold text-emerald-900">正在检测当前浏览器俄语语音包...</div>
+          <p class="text-emerald-700 leading-relaxed">
+            💡 <strong>白嫖满血音质技巧：</strong>用电脑端 <strong>Microsoft Edge 浏览器</strong>打开本网页，程序会自动锁定微软云端 <code>Svetlana Online (Natural)</code> 俄语神经网络女声，无需任何 Key 即可大陆裸连发声！
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between pt-2 border-t border-slate-100">
+        <button onclick="testTtsVoice()" class="px-3.5 py-2 rounded-lg text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-medium transition">
+          🔊 试听当前俄语发音
+        </button>
+        <div class="flex gap-2">
+          <button onclick="toggleConfigModal()" class="px-4 py-2 rounded-lg text-sm bg-slate-100 hover:bg-slate-200 text-slate-700">关闭</button>
+          <button onclick="saveConfig()" class="px-5 py-2 rounded-lg text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium">保存配置</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ==================== 默认示例俄语文章 ====================
+    const DEFAULT_ARTICLE = `Когда человек серьёзно увлекается изучением иностранного языка, он постепенно начинает замечать тонкие оттенки смысла, которые раньше казались ему совершенно незаметными.
+
+Чтение оригинальной русской литературы требует не только хорошего словарного запаса, но и глубокого понимания глагольного управления и падежной системы.`;
+
+    // ==================== 状态与缓存管理 (省 Token 核心) ====================
+    const state = {
+      deepseekKey: localStorage.getItem('ru_ds_key') || '',
+      deepseekModel: localStorage.getItem('ru_ds_model') || 'deepseek-chat',
+      ttsProvider: localStorage.getItem('ru_tts_provider') || 'edge_native',
+      azureKey: localStorage.getItem('ru_azure_key') || '',
+      azureRegion: localStorage.getItem('ru_azure_region') || 'eastasia',
+      azureVoice: localStorage.getItem('ru_azure_voice') || 'ru-RU-SvetlanaNeural',
+      openaiTtsUrl: localStorage.getItem('ru_oa_tts_url') || 'https://api.siliconflow.cn/v1/audio/speech',
+      openaiTtsKey: localStorage.getItem('ru_oa_tts_key') || '',
+      openaiTtsModel: localStorage.getItem('ru_oa_tts_model') || 'tts-1',
+      openaiTtsVoice: localStorage.getItem('ru_oa_tts_voice') || 'alloy',
+      currentWordEl: null,
+      currentWordText: '',
+      currentSentenceText: '',
+      currentLemma: '',
+      currentPos: '',
+      activeAudioObj: null,
+      // 本地内存缓存：避免重复点击消耗 Token 与音频流量
+      basicWordCache: new Map(),
+      deepWordCache: new Map(),
+      sentenceCache: new Map(),
+      audioCache: new Map()
+    };
+
+    // 页面加载初始化
+    window.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('cfgDeepseekKey').value = state.deepseekKey;
+      document.getElementById('cfgDeepseekModel').value = state.deepseekModel;
+      document.getElementById('cfgTtsProvider').value = state.ttsProvider;
+      document.getElementById('cfgAzureKey').value = state.azureKey;
+      document.getElementById('cfgAzureRegion').value = state.azureRegion;
+      document.getElementById('cfgAzureVoice').value = state.azureVoice;
+      document.getElementById('cfgOpenaiTtsUrl').value = state.openaiTtsUrl;
+      document.getElementById('cfgOpenaiTtsKey').value = state.openaiTtsKey;
+      document.getElementById('cfgOpenaiTtsModel').value = state.openaiTtsModel;
+      document.getElementById('cfgOpenaiTtsVoice').value = state.openaiTtsVoice;
+      updateTtsFormUI();
+
+      // 预加载并检测浏览器内置俄语语音包
+      if ('speechSynthesis' in window) {
+        detectNativeRussianVoice();
+        window.speechSynthesis.onvoiceschanged = detectNativeRussianVoice;
+      }
+
+      document.getElementById('rawTextInput').value = DEFAULT_ARTICLE;
+      renderArticle(DEFAULT_ARTICLE);
+    });
+
+    // 检测当前浏览器的最优俄语发音人
+    function getBestNativeRussianVoice() {
+      if (!('speechSynthesis' in window)) return null;
+      const voices = window.speechSynthesis.getVoices();
+      return (
+        voices.find(v => v.name.includes('Svetlana') && v.name.includes('Natural')) ||
+        voices.find(v => v.name.includes('Dmitry') && v.name.includes('Natural')) ||
+        voices.find(v => v.lang.startsWith('ru') && v.name.includes('Online')) ||
+        voices.find(v => v.lang.startsWith('ru'))
+      );
+    }
+
+    function detectNativeRussianVoice() {
+      const statusEl = document.getElementById('detectedVoiceStatus');
+      if (!statusEl) return;
+      const bestVoice = getBestNativeRussianVoice();
+      if (bestVoice) {
+        const isNeural = bestVoice.name.includes('Natural') || bestVoice.name.includes('Online');
+        statusEl.textContent = isNeural
+          ? `✅ 已成功锁定微软神经网络俄语语音：${bestVoice.name}`
+          : `🔈 当前检测到系统标准俄语语音：${bestVoice.name}`;
+      } else {
+        statusEl.textContent = `⚠️ 当前浏览器未检测到内置俄语语音包，建议使用 Edge 打开或配置 Azure/兼容接口`;
+      }
+    }
+
+    // ==================== 文本切分与交互渲染引擎 ====================
+    function renderArticle(rawText) {
+      const container = document.getElementById('articleContainer');
+      container.innerHTML = '';
+
+      const paragraphs = rawText.split(/\n+/).map(p => p.trim()).filter(Boolean);
+
+      paragraphs.forEach((paraText) => {
+        const pWrapper = document.createElement('div');
+        pWrapper.className = 'para-block space-y-2';
+
+        const pEl = document.createElement('p');
+        pEl.className = 'text-slate-800';
+
+        // 按俄语句末标点切分句子
+        const sentences = paraText.match(/[^.!?…]+[.!?…]+\s*|[^.!?…]+$/g) || [paraText];
+
+        sentences.forEach((sentText) => {
+          const cleanSent = sentText.trim();
+          if (!cleanSent) return;
+
+          const sentSpan = document.createElement('span');
+          sentSpan.className = 'ru-sentence';
+          sentSpan.dataset.sentence = cleanSent;
+
+          // 切分西里尔字母单词（支持带连字符复合词，如 по-русски）
+          const tokenRegex = /([а-яА-ЯёЁ́]+(?:-[а-яА-ЯёЁ́]+)*)/g;
+          let lastIndex = 0;
+          let match;
+
+          while ((match = tokenRegex.exec(sentText)) !== null) {
+            if (match.index > lastIndex) {
+              sentSpan.appendChild(document.createTextNode(sentText.slice(lastIndex, match.index)));
+            }
+            const word = match[0];
+            const wordSpan = document.createElement('span');
+            wordSpan.className = 'ru-word';
+            wordSpan.textContent = word;
+            wordSpan.dataset.rawWord = word.replace(/\u0301/g, '');
+            wordSpan.onclick = (e) => {
+              e.stopPropagation();
+              handleWordClick(wordSpan, cleanSent);
+            };
+            sentSpan.appendChild(wordSpan);
+            lastIndex = tokenRegex.lastIndex;
+          }
+
+          if (lastIndex < sentText.length) {
+            sentSpan.appendChild(document.createTextNode(sentText.slice(lastIndex)));
+          }
+
+          // 句末添加 [句法] 按钮
+          const syntaxBtn = document.createElement('button');
+          syntaxBtn.className = 'sent-btn';
+          syntaxBtn.textContent = '句法';
+          syntaxBtn.title = '提取本句主干与语法树';
+          syntaxBtn.onclick = (e) => {
+            e.stopPropagation();
+            handleSentenceAnalysis(sentSpan, cleanSent);
+          };
+
+          pEl.appendChild(sentSpan);
+          pEl.appendChild(syntaxBtn);
+        });
+
+        // 段落译文占位框（默认隐藏）
+        const transEl = document.createElement('div');
+        transEl.className = 'para-trans hidden text-sm text-slate-600 bg-slate-50 border-l-4 border-amber-400 pl-3 py-2 rounded-r-lg font-sans';
+        transEl.dataset.rawPara = paraText;
+
+        pWrapper.appendChild(pEl);
+        pWrapper.appendChild(transEl);
+        container.appendChild(pWrapper);
+      });
+    }
+
+    // ==================== DeepSeek API 通用 JSON 请求器 ====================
+    async function callDeepSeekJSON(systemPrompt, userPrompt) {
+      if (!state.deepseekKey) {
+        toggleConfigModal();
+        throw new Error('请先在设置弹窗中填入您的 DeepSeek API Key');
+      }
+
+      const response = await fetch('https://api.deepseek.com/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${state.deepseekKey}`
+        },
+        body: JSON.stringify({
+          model: state.deepseekModel || 'deepseek-chat',
+          response_format: { type: 'json_object' },
+          temperature: 0.2,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`DeepSeek API 请求失败 (${response.status}): ${errText}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices[0].message.content;
+      return JSON.parse(content);
+    }
+
+    // ==================== 1. 单词点击：轻量化解析 + 原文重音标注 ====================
+    async function handleWordClick(wordEl, sentenceText) {
+      switchTab('word');
+
+      document.querySelectorAll('.ru-word.active-word').forEach(el => el.classList.remove('active-word'));
+      document.querySelectorAll('.ru-sentence.active-sentence').forEach(el => el.classList.remove('active-sentence'));
+      wordEl.classList.add('active-word');
+      wordEl.parentElement.classList.add('active-sentence');
+
+      const rawWord = wordEl.dataset.rawWord;
+      state.currentWordEl = wordEl;
+      state.currentWordText = rawWord;
+      state.currentSentenceText = sentenceText;
+
+      document.getElementById('deepWordResult').classList.add('hidden');
+      document.getElementById('deepAnalysisTrigger').classList.remove('hidden');
+
+      const cacheKey = `${rawWord.toLowerCase()}__${sentenceText}`;
+      if (state.basicWordCache.has(cacheKey)) {
+        renderBasicWordData(state.basicWordCache.get(cacheKey), wordEl);
+        return;
+      }
+
+      setLoading(true, `正在快查单词 "${rawWord}" 并在原文标注重音...`);
+      try {
+        const sysPrompt = `你是一位严谨的俄语语法专家。请对用户选中句子中的目标俄语单词进行轻量化解析（省Token模式）。
+必须返回严格的 JSON 格式，包含以下字段：
+{
+  "stressed_word": "当前词形带重音符号(使用组合重音符 U+0301，例如 чита́ет；单音节或含ё的词原样返回)",
+  "lemma": "词元/原形(带重音符号，如 чита́ть)",
+  "pos": "中文词性简称(如：及物动词/阳性名词/形容词/前置词)",
+  "context_grammar": "该词在当前句中的具体语法形态(如：未完成体、第一变位法、现在时、第三人称单数；若是名词则写明：单数第六格/前置格，受前置词 о 支配)",
+  "translation": "贴合当前语境的汉语释义(兼顾本义)",
+  "context_note": "1~2句话简明扼要地解释它在句中的搭配或为什么用这个格/形态"
+}`;
+        const userPrompt = `句子：${sentenceText}\n目标单词：${rawWord}`;
+        const result = await callDeepSeekJSON(sysPrompt, userPrompt);
+
+        state.basicWordCache.set(cacheKey, result);
+        renderBasicWordData(result, wordEl);
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function renderBasicWordData(data, wordEl) {
+      document.getElementById('wordEmptyState').classList.add('hidden');
+      document.getElementById('wordContent').classList.remove('hidden');
+
+      if (data.stressed_word && wordEl) {
+        wordEl.textContent = data.stressed_word;
+      }
+
+      state.currentLemma = data.lemma || state.currentWordText;
+      state.currentPos = data.pos || '';
+
+      document.getElementById('wStressed').textContent = data.stressed_word || state.currentWordText;
+      document.getElementById('wLemma').textContent = `原形: ${data.lemma || '-'}`;
+      document.getElementById('wPos').textContent = data.pos || '词汇';
+      document.getElementById('wTranslation').textContent = data.translation || '';
+      document.getElementById('wContextGrammar').textContent = data.context_grammar || '';
+      document.getElementById('wContextNote').textContent = data.context_note || '';
+    }
+
+    // ==================== 2. 单词深度解析：体对、变位/变格、接格支配 ====================
+    async function fetchDeepWordAnalysis() {
+      const lemmaKey = (state.currentLemma || state.currentWordText).toLowerCase();
+      if (state.deepWordCache.has(lemmaKey)) {
+        renderDeepWordData(state.deepWordCache.get(lemmaKey));
+        return;
+      }
+
+      setLoading(true, `正在深度解析 "${state.currentLemma}" 的变格/变位与支配关系...`);
+      try {
+        const sysPrompt = `你是俄语专业语法词典引擎。请针对目标俄语词提供完整的深度语法信息（所有俄语词均须标注重音符号 U+0301）。
+必须返回严格 JSON，包含以下 3 个字段：
+{
+  "aspect_or_gender": "如果是动词：写明【体对 (Видовая пара)】未完成体(НСВ)与完成体(СВ)对应词及体意义差异；如果是名词：写明性、动物/非动物属性、变格法(第一/二/三变格法)及重音移动规律；其他词性写核心语法特征。",
+  "inflection_table": "如果是动词：列出核心变位表(я, ты, он/она, мы, вы, они 现在/将来时变位 + 过去时 м/ж/ср/мн + 命令式)；如果是名词或形容词：列出单数与复数六格(И.п., Р.п., Д.п., В.п., Т.п., П.п.)完整形式。",
+  "governance": "常用接格与介词支配(Управление)：详细列出该词常支配的格(如 кого/чего, кому/чему, кем/чем)或常搭配的前置词+格(如 в/на + В.п./П.п., к + Д.п.)，并给出 2 个简短带重音的俄汉双语搭配例句。"
+}`;
+        const userPrompt = `词形：${state.currentWordText}（原形：${state.currentLemma}，词性：${state.currentPos}）\n所在原句：${state.currentSentenceText}`;
+        const result = await callDeepSeekJSON(sysPrompt, userPrompt);
+
+        state.deepWordCache.set(lemmaKey, result);
+        renderDeepWordData(result);
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function renderDeepWordData(data) {
+      document.getElementById('deepAnalysisTrigger').classList.add('hidden');
+      document.getElementById('deepWordResult').classList.remove('hidden');
+      document.getElementById('dwAspectOrGender').textContent = data.aspect_or_gender || '-';
+      document.getElementById('dwInflectionTable').textContent = data.inflection_table || '-';
+      document.getElementById('dwGovernance').textContent = data.governance || '-';
+    }
+
+    // ==================== 3. 长难句语法树与主干提取 ====================
+    async function handleSentenceAnalysis(sentSpan, sentenceText) {
+      switchTab('sentence');
+
+      document.querySelectorAll('.ru-sentence.active-sentence').forEach(el => el.classList.remove('active-sentence'));
+      sentSpan.classList.add('active-sentence');
+      state.currentSentenceText = sentenceText;
+
+      if (state.sentenceCache.has(sentenceText)) {
+        renderSentenceData(state.sentenceCache.get(sentenceText));
+        return;
+      }
+
+      setLoading(true, '正在提取句子主干并构建俄语句法依存树...');
+      try {
+        const sysPrompt = `你是俄语长难句句法分析专家。请对用户给出的俄语句子进行主干提取与语法树拆解。
+必须返回严格 JSON，包含以下字段：
+{
+  "stressed_sentence": "整句标注重音符号(U+0301)后的俄语原句",
+  "translation": "准确、流畅的中文翻译",
+  "main_trunk": "提取主句与各从句的【主干 (Грамматическая основа)】：明确标出主语(Подлежащее，一格) + 谓语(Сказуемое)及其核心受支配补语",
+  "syntax_tree": "使用缩进树状图符号(├─, └─, │)绘制可视化【句法语法树】，标明每个成分的角色(主句/定语从句/时间状语从句/分词短语/补语第几格等)",
+  "notes": "解析句中的难点语法结构(如：который 的性数格指代、形动词/副动词转换、无人称句或特殊支配关系)"
+}`;
+        const result = await callDeepSeekJSON(sysPrompt, `请拆解以下俄语句子：\n${sentenceText}`);
+        state.sentenceCache.set(sentenceText, result);
+        renderSentenceData(result);
+      } catch (err) {
+        alert(err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function renderSentenceData(data) {
+      document.getElementById('sentenceEmptyState').classList.add('hidden');
+      document.getElementById('sentenceContent').classList.remove('hidden');
+
+      document.getElementById('sOriginal').textContent = data.stressed_sentence || state.currentSentenceText;
+      document.getElementById('sTranslation').textContent = data.translation || '';
+      document.getElementById('sTrunk').textContent = data.main_trunk || '';
+      document.getElementById('sSyntaxTree').textContent = data.syntax_tree || '';
+      document.getElementById('sNotes').textContent = data.notes || '';
+    }
+
+    // ==================== 4. 全文对照翻译 ====================
+    async function translateFullText() {
+      const transBlocks = document.querySelectorAll('.para-trans');
+      const isCurrentlyVisible = !transBlocks[0]?.classList.contains('hidden');
+
+      if (isCurrentlyVisible) {
+        transBlocks.forEach(el => el.classList.add('hidden'));
+        return;
+      }
+
+      const rawParagraphs = Array.from(transBlocks).map(el => el.dataset.rawPara);
+      transBlocks.forEach(el => {
+        el.classList.remove('hidden');
+        if (!el.textContent) el.textContent = '⏳ 正在翻译本段...';
+      });
+
+      if (Array.from(transBlocks).every(el => el.dataset.translated === 'true')) {
+        return;
+      }
+
+      try {
+        const sysPrompt = `请将用户提供的俄语段落数组逐段翻译成自然、准确的中文。
+返回严格 JSON 格式：{"translations": ["第一段译文", "第二段译文", ...]}`;
+        const result = await callDeepSeekJSON(sysPrompt, JSON.stringify(rawParagraphs));
+
+        if (Array.isArray(result.translations)) {
+          transBlocks.forEach((el, idx) => {
+            el.textContent = result.translations[idx] || '翻译缺失';
+            el.dataset.translated = 'true';
+          });
+        }
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    // ==================== 5. 多源大陆直连俄语 TTS 核心引擎 ====================
+    function stopAudioPlayback() {
+      if (state.activeAudioObj) {
+        state.activeAudioObj.pause();
+        state.activeAudioObj = null;
+      }
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    }
+
+    function playAudioUrl(url) {
+      stopAudioPlayback();
+      const audio = new Audio(url);
+      state.activeAudioObj = audio;
+      audio.play();
+    }
+
+    async function speakRussian(text) {
+      if (!text) return;
+      const cleanText = text.replace(/\u0301/g, '').trim();
+      const cacheKey = `${state.ttsProvider}__${state.azureVoice}__${state.openaiTtsVoice}__${cleanText}`;
+
+      // 1. 命中本地 Blob 音频缓存直接播放
+      if (state.audioCache.has(cacheKey)) {
+        playAudioUrl(state.audioCache.get(cacheKey));
+        return;
+      }
+
+      // 2. 模式 A：微软 Azure REST API 前端直连 (支持 CORS，大陆裸连)
+      if (state.ttsProvider === 'azure' && state.azureKey) {
+        try {
+          const endpoint = `https://${state.azureRegion}.tts.speech.microsoft.com/cognitiveservices/v1`;
+          const ssml = `<speak version='1.0' xml:lang='ru-RU'>
+            <voice xml:lang='ru-RU' name='${state.azureVoice}'>
+              <prosody rate='-8%'>${cleanText}</prosody>
+            </voice>
+          </speak>`;
+
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Ocp-Apim-Subscription-Key': state.azureKey,
+              'Content-Type': 'application/ssml+xml',
+              'X-Microsoft-OutputFormat': 'audio-24khz-96kbitrate-mono-mp3'
+            },
+            body: ssml
+          });
+
+          if (!res.ok) throw new Error(`Azure TTS 状态码 ${res.status}`);
+          const blob = await res.blob();
+          const audioUrl = URL.createObjectURL(blob);
+          state.audioCache.set(cacheKey, audioUrl);
+          playAudioUrl(audioUrl);
+          return;
+        } catch (err) {
+          console.warn('Azure TTS 请求失败，已自动回退至本地/Edge 俄语语音:', err);
+        }
+      }
+
+      // 3. 模式 B：OpenAI / 硅基流动兼容接口直连 (/v1/audio/speech)
+      if (state.ttsProvider === 'openai_compat' && state.openaiTtsKey) {
+        try {
+          const res = await fetch(state.openaiTtsUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${state.openaiTtsKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: state.openaiTtsModel,
+              input: cleanText,
+              voice: state.openaiTtsVoice,
+              response_format: 'mp3'
+            })
+          });
+
+          if (!res.ok) throw new Error(`兼容 TTS 接口状态码 ${res.status}`);
+          const blob = await res.blob();
+          const audioUrl = URL.createObjectURL(blob);
+          state.audioCache.set(cacheKey, audioUrl);
+          playAudioUrl(audioUrl);
+          return;
+        } catch (err) {
+          console.warn('兼容 TTS 接口请求失败，已自动回退至本地/Edge 俄语语音:', err);
+        }
+      }
+
+      // 4. 模式 C（默认/保底）：智能匹配 Edge Online Neural (Svetlana / Dmitry)
+      if ('speechSynthesis' in window) {
+        stopAudioPlayback();
+        const utter = new SpeechSynthesisUtterance(cleanText);
+        utter.lang = 'ru-RU';
+        utter.rate = 0.92;
+
+        const bestRuVoice = getBestNativeRussianVoice();
+        if (bestRuVoice) {
+          utter.voice = bestRuVoice;
+        }
+        window.speechSynthesis.speak(utter);
+      } else {
+        alert('当前浏览器不支持语音合成，请配置 Azure 或兼容 TTS 接口');
+      }
+    }
+
+    function speakCurrentWord() {
+      speakRussian(state.currentWordText);
+    }
+
+    function speakCurrentSentence() {
+      speakRussian(state.currentSentenceText);
+    }
+
+    function speakFullText() {
+      const fullText = document.getElementById('rawTextInput').value;
+      speakRussian(fullText);
+    }
+
+    function testTtsVoice() {
+      syncFormToState();
+      speakRussian('Здравствуйте! Чтение русской литературы помогает лучше понять грамматику.');
+    }
+
+    // ==================== UI 与配置辅助函数 ====================
+    function updateTtsFormUI() {
+      const provider = document.getElementById('cfgTtsProvider').value;
+      document.getElementById('azureConfigBox').classList.toggle('hidden', provider !== 'azure');
+      document.getElementById('openaiConfigBox').classList.toggle('hidden', provider !== 'openai_compat');
+      document.getElementById('edgeHintBox').classList.toggle('hidden', provider !== 'edge_native');
+      if (provider === 'edge_native') detectNativeRussianVoice();
+    }
+
+    function syncFormToState() {
+      state.deepseekKey = document.getElementById('cfgDeepseekKey').value.trim();
+      state.deepseekModel = document.getElementById('cfgDeepseekModel').value.trim() || 'deepseek-chat';
+      state.ttsProvider = document.getElementById('cfgTtsProvider').value;
+      state.azureKey = document.getElementById('cfgAzureKey').value.trim();
+      state.azureRegion = document.getElementById('cfgAzureRegion').value.trim() || 'eastasia';
+      state.azureVoice = document.getElementById('cfgAzureVoice').value;
+      state.openaiTtsUrl = document.getElementById('cfgOpenaiTtsUrl').value.trim();
+      state.openaiTtsKey = document.getElementById('cfgOpenaiTtsKey').value.trim();
+      state.openaiTtsModel = document.getElementById('cfgOpenaiTtsModel').value.trim();
+      state.openaiTtsVoice = document.getElementById('cfgOpenaiTtsVoice').value.trim();
+    }
+
+    function saveConfig() {
+      syncFormToState();
+      localStorage.setItem('ru_ds_key', state.deepseekKey);
+      localStorage.setItem('ru_ds_model', state.deepseekModel);
+      localStorage.setItem('ru_tts_provider', state.ttsProvider);
+      localStorage.setItem('ru_azure_key', state.azureKey);
+      localStorage.setItem('ru_azure_region', state.azureRegion);
+      localStorage.setItem('ru_azure_voice', state.azureVoice);
+      localStorage.setItem('ru_oa_tts_url', state.openaiTtsUrl);
+      localStorage.setItem('ru_oa_tts_key', state.openaiTtsKey);
+      localStorage.setItem('ru_oa_tts_model', state.openaiTtsModel);
+      localStorage.setItem('ru_oa_tts_voice', state.openaiTtsVoice);
+      toggleConfigModal();
+    }
+
+    function switchTab(tab) {
+      const isWord = tab === 'word';
+      document.getElementById('wordPanel').classList.toggle('hidden', !isWord);
+      document.getElementById('sentencePanel').classList.toggle('hidden', isWord);
+
+      document.getElementById('tabWordBtn').className = isWord
+        ? 'py-3 text-center border-b-2 border-blue-600 text-blue-600 bg-white'
+        : 'py-3 text-center border-b-2 border-transparent text-slate-500 hover:text-slate-700';
+
+      document.getElementById('tabSentenceBtn').className = !isWord
+        ? 'py-3 text-center border-b-2 border-blue-600 text-blue-600 bg-white'
+        : 'py-3 text-center border-b-2 border-transparent text-slate-500 hover:text-slate-700';
+    }
+
+    function setLoading(isLoading, text = '正在请求 AI 解析...') {
+      const el = document.getElementById('loadingIndicator');
+      document.getElementById('loadingText').textContent = text;
+      el.classList.toggle('hidden', !isLoading);
+    }
+
+    function toggleEditModal() {
+      const modal = document.getElementById('editModal');
+      modal.classList.toggle('hidden');
+      modal.classList.toggle('flex');
+    }
+
+    function toggleConfigModal() {
+      const modal = document.getElementById('configModal');
+      modal.classList.toggle('hidden');
+      modal.classList.toggle('flex');
+      if (!modal.classList.contains('hidden')) {
+        detectNativeRussianVoice();
+      }
+    }
+
+    function applyNewArticle() {
+      const text = document.getElementById('rawTextInput').value.trim();
+      if (text) {
+        renderArticle(text);
+        toggleEditModal();
+      }
+    }
+  </script>
+</body>
+</html>
